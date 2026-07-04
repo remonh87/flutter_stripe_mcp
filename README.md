@@ -1,12 +1,22 @@
 # flutter-stripe-mcp
 
-An MCP server that diagnoses Flutter + Stripe Android integration issues — so Claude can check your project setup automatically.
+An MCP server that diagnoses Flutter + Stripe ([flutter_stripe](https://pub.dev/packages/flutter_stripe)) setup issues — so Claude can check your project automatically.
 
 ## What it does
 
-| Tool | What it checks |
-|------|----------------|
-| `diagnose_setup` | Reads your `android/build.gradle` and validates the Kotlin version against flutter_stripe's requirements (min `1.9.0`, latest `2.1.21`) |
+One tool, `diagnose_setup`, takes the path to your Flutter project root and runs every check:
+
+| Check | Requirement |
+|-------|-------------|
+| `kotlin` | Kotlin version >= 1.9.0 (read from `android/settings.gradle` or legacy `android/build.gradle`) |
+| `gradle_wrapper` | Gradle wrapper >= 8.0 |
+| `android_themes` | Theme styles derive from `Theme.AppCompat.*`, `Theme.MaterialComponents.*`, or `Theme.Material3.*` |
+| `main_activity` | `MainActivity` extends `FlutterFragmentActivity` (not `FlutterActivity`) |
+| `proguard_rules` | `proguard-rules.pro` contains all required Stripe rules |
+| `ios_deployment_target` | iOS deployment target >= 13.0 (from `Podfile` or `project.pbxproj`) |
+| `ios_camera_permission` | `NSCameraUsageDescription` set in `Info.plist` (suggestion — needed for card scanning) |
+
+The result lists passing checks by name and returns a `fix` instruction for each problem found. Platforms without an `android/` or `ios/` directory are skipped.
 
 ## Install
 
@@ -34,7 +44,7 @@ Open `~/Library/Application Support/Claude/claude_desktop_config.json` and add:
 }
 ```
 
-Restart Claude Desktop. Claude will now have access to the diagnostic tools.
+Restart Claude Desktop. Claude will now have access to the diagnostic tool.
 
 ## Add to Claude Code
 
@@ -46,6 +56,13 @@ claude mcp add flutter-stripe-mcp -- flutter-stripe-mcp
 
 Ask Claude:
 
-> "Check if my Flutter project's Kotlin version is compatible with flutter_stripe. The gradle file is at `/path/to/android/build.gradle`."
+> "Check if my Flutter project at `/path/to/myapp` is set up correctly for flutter_stripe."
 
-Claude will call `diagnose_setup` and tell you exactly what to fix.
+Claude calls `diagnose_setup` with the project root and tells you exactly what to fix.
+
+## Development
+
+```bash
+uv sync
+uv run pytest
+```

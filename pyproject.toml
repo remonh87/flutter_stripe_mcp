@@ -1,13 +1,30 @@
 [project]
 name = "flutter-stripe-mcp"
 version = "0.1.0"
-description = "Add your description here"
+description = "MCP server that diagnoses Flutter + Stripe (flutter_stripe) Android and iOS setup issues"
 readme = "README.md"
-requires-python = ">=3.14"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Rémon Helmond", email = "remonhelmond+dev@gmail.com" },
+]
+requires-python = ">=3.10"
 dependencies = [
-    "httpx>=0.28.1",
     "mcp[cli]>=1.28.1",
 ]
 
 [project.scripts]
-flutter-stripe-mcp = "server:main"
+flutter-stripe-mcp = "flutter_stripe_mcp.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

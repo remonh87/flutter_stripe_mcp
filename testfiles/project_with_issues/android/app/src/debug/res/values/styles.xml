@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- VIOLATION: @android:style/ prefix is not stripped; this fails because it does
+         not start with Theme.AppCompat, Theme.MaterialComponents, or Theme.Material3 -->
+    <style name="DebugTheme" parent="@android:style/Theme.Light"/>
+</resources>

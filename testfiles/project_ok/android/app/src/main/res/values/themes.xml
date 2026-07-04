@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="LaunchTheme" parent="Theme.MaterialComponents.DayNight.NoActionBar"/>
+    <style name="NormalTheme" parent="Theme.AppCompat.Light.NoActionBar"/>
+    <style name="AppTheme.Material3" parent="Theme.Material3.Light.NoActionBar"/>
+    <style name="Base.AppTheme" parent="Base.Theme.AppCompat"/>
+    <!-- ButtonStyle has no "theme" in its name, so it is intentionally ignored by the check -->
+    <style name="ButtonStyle" parent="Widget.AppCompat.Button"/>
+</resources>
