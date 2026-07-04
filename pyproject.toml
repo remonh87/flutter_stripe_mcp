@@ -10,4 +10,4 @@ dependencies = [
 ]
 
 [project.scripts]
-flutter-stripe-mcp = "main:main"
+flutter-stripe-mcp = "server:main"

@@ -1,14 +1,9 @@
 import re
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
-
-mcp = FastMCP("flutter-stripe-mcp")
-
 KOTLIN_MIN_VERSION = "1.9.0"
 KOTLIN_LATEST_VERSION = "2.1.21"
 
-# Patterns tried in order; first match wins.
 _KOTLIN_VERSION_PATTERNS: list[re.Pattern[str]] = [
     # ext.kotlin_version = "1.9.0"  /  kotlin_version = '1.9.0' inside ext {}
     re.compile(r'(?:ext\.)?kotlin_version\s*=\s*["\'](\d+\.\d+\.\d+)["\']'),
@@ -23,31 +18,7 @@ def _parse_version(version_str: str) -> tuple[int, ...]:
     return tuple(int(part) for part in version_str.split("."))
 
 
-@mcp.tool()
-def diagnose_setup(build_gradle_path: str) -> dict[str, Any]:
-    """
-    Diagnose the Flutter + Stripe Android setup from a project-level Gradle file.
-
-    Reads the build.gradle or build.gradle.kts file at the given path, detects
-    the Kotlin version (supporting Groovy DSL, Kotlin DSL, and ext block forms),
-    and checks it against flutter_stripe's minimum requirement (1.9.0) and the
-    latest recommended stable Kotlin version (2.1.21 as of mid-2025).
-
-    Args:
-        build_gradle_path: Absolute path to the project-level build.gradle or
-                           build.gradle.kts file (e.g. /path/to/android/build.gradle).
-
-    Returns:
-        A dict with keys:
-          - kotlin_version_found (bool)
-          - detected_version (str | None)
-          - meets_minimum_requirement (bool | None): None on I/O error
-          - minimum_required (str): "1.9.0"
-          - is_up_to_date (bool | None): None on I/O error
-          - latest_recommended (str): "2.1.21"
-          - status (str): "ok", "outdated", "missing", or "error"
-          - suggestion (str | None): fix instructions, or None when status is "ok"
-    """
+def check_kotlin_version(build_gradle_path: str) -> dict[str, Any]:
     try:
         with open(build_gradle_path, encoding="utf-8") as fh:
             content = fh.read()
@@ -130,11 +101,3 @@ def diagnose_setup(build_gradle_path: str) -> dict[str, Any]:
         "status": status,
         "suggestion": suggestion,
     }
-
-
-def main() -> None:
-    mcp.run(transport="stdio")
-
-
-if __name__ == "__main__":
-    main()
