@@ -11,6 +11,8 @@ KOTLIN_LATEST_VERSION = "2.1.21"
 
 GRADLE_WRAPPER_MIN_VERSION = "8.0"
 
+IOS_MIN_DEPLOYMENT_TARGET = "13.0"
+
 VALID_THEME_PARENT_PREFIXES: tuple[str, ...] = (
     "Theme.AppCompat",
     "Base.Theme.AppCompat",
@@ -334,6 +336,147 @@ _PROGUARD_FALLBACK_RULES: list[str] = [
     "-dontwarn kotlinx.parcelize.Parcelize",
     "-keep class com.stripe.** { *; }",
 ]
+
+
+_PODFILE_PLATFORM_PATTERN = re.compile(
+    r"platform\s*:ios\s*,\s*['\"](\d+(?:\.\d+)?)['\"]"
+)
+_PBXPROJ_DEPLOYMENT_TARGET_PATTERN = re.compile(
+    r"IPHONEOS_DEPLOYMENT_TARGET\s*=\s*(\d+(?:\.\d+)?)"
+)
+
+
+def check_ios_deployment_target(ios_path: str) -> dict[str, Any]:
+    source: str | None = None
+    detected_version: str | None = None
+
+    podfile_path = os.path.join(ios_path, "Podfile")
+    try:
+        with open(podfile_path, encoding="utf-8") as fh:
+            content = fh.read()
+        match = _PODFILE_PLATFORM_PATTERN.search(content)
+        if match:
+            detected_version = match.group(1)
+            source = "podfile"
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        return {
+            "detected_version": None,
+            "minimum_required": IOS_MIN_DEPLOYMENT_TARGET,
+            "meets_requirement": None,
+            "source": "podfile",
+            "status": "error",
+            "suggestion": f"Could not read Podfile: {exc}",
+        }
+
+    if detected_version is None:
+        pbxproj_path = os.path.join(ios_path, "Runner.xcodeproj", "project.pbxproj")
+        try:
+            with open(pbxproj_path, encoding="utf-8") as fh:
+                content = fh.read()
+            versions = _PBXPROJ_DEPLOYMENT_TARGET_PATTERN.findall(content)
+            if versions:
+                detected_version = min(versions, key=_parse_version)
+                source = "pbxproj"
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            return {
+                "detected_version": None,
+                "minimum_required": IOS_MIN_DEPLOYMENT_TARGET,
+                "meets_requirement": None,
+                "source": "pbxproj",
+                "status": "error",
+                "suggestion": f"Could not read project.pbxproj: {exc}",
+            }
+
+    if detected_version is None:
+        return {
+            "detected_version": None,
+            "minimum_required": IOS_MIN_DEPLOYMENT_TARGET,
+            "meets_requirement": None,
+            "source": None,
+            "status": "missing",
+            "suggestion": (
+                "Could not detect the iOS minimum deployment target. "
+                "For CocoaPods, add \"platform :ios, '13.0'\" to your Podfile. "
+                "For SPM, open Xcode → select the Runner target → Build Settings → "
+                "set 'iOS Deployment Target' to 13.0."
+            ),
+        }
+
+    meets = _parse_version(detected_version) >= _parse_version(IOS_MIN_DEPLOYMENT_TARGET)
+
+    if meets:
+        suggestion = None
+    elif source == "podfile":
+        suggestion = (
+            f"iOS deployment target {detected_version} is below the minimum "
+            f"{IOS_MIN_DEPLOYMENT_TARGET} required by flutter_stripe. "
+            f"Update your Podfile: platform :ios, '{IOS_MIN_DEPLOYMENT_TARGET}'"
+        )
+    else:
+        suggestion = (
+            f"iOS deployment target {detected_version} is below the minimum "
+            f"{IOS_MIN_DEPLOYMENT_TARGET} required by flutter_stripe. "
+            f"In Xcode, select the Runner target → Build Settings → "
+            f"set 'iOS Deployment Target' to {IOS_MIN_DEPLOYMENT_TARGET}."
+        )
+
+    return {
+        "detected_version": detected_version,
+        "minimum_required": IOS_MIN_DEPLOYMENT_TARGET,
+        "meets_requirement": meets,
+        "source": source,
+        "status": "ok" if meets else "outdated",
+        "suggestion": suggestion,
+    }
+
+
+def check_ios_camera_permission(ios_path: str) -> dict[str, Any]:
+    info_plist_path = os.path.join(ios_path, "Runner", "Info.plist")
+
+    try:
+        tree = ET.parse(info_plist_path)
+    except FileNotFoundError:
+        return {
+            "has_permission": None,
+            "status": "error",
+            "suggestion": f"Info.plist not found at {info_plist_path}.",
+        }
+    except ET.ParseError as exc:
+        return {
+            "has_permission": None,
+            "status": "error",
+            "suggestion": f"Could not parse Info.plist: {exc}",
+        }
+    except OSError as exc:
+        return {
+            "has_permission": None,
+            "status": "error",
+            "suggestion": f"Could not read Info.plist: {exc}",
+        }
+
+    root = tree.getroot()
+    plist_dict = root.find("dict")
+    keys: list[str] = (
+        [elem.text or "" for elem in plist_dict.findall("key")]
+        if plist_dict is not None
+        else []
+    )
+    has_permission = "NSCameraUsageDescription" in keys
+
+    return {
+        "has_permission": has_permission,
+        "status": "ok" if has_permission else "suggestion",
+        "suggestion": None if has_permission else (
+            "NSCameraUsageDescription is not set in ios/Runner/Info.plist. "
+            "Add it if your app uses card scanning (e.g. flutter_stripe's CardField). "
+            "Example: <key>NSCameraUsageDescription</key>"
+            "<string>Used to scan payment cards</string>"
+        ),
+    }
 
 
 def _parse_proguard_rules(content: str) -> list[str]:
