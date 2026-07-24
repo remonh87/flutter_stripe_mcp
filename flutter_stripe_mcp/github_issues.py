@@ -1,4 +1,5 @@
 import atexit
+import concurrent.futures
 import os
 import re
 import threading
@@ -23,6 +24,10 @@ _STOPWORDS = {
     "to", "of", "in", "on", "at", "for", "with", "and", "or", "not",
     "this", "that", "it", "its", "as", "by", "from", "when", "while", "i",
 }
+
+# Matches GitHub search qualifiers (repo:, org:, is:, in:, label:, ...),
+# including a leading `-` for negated qualifiers.
+_QUALIFIER_RE = re.compile(r"-?\b[A-Za-z_]+:\S+")
 
 
 _default_client_instance: httpx.Client | None = None
@@ -103,9 +108,15 @@ def _get_response(
             "kind": "not_found",
         }
 
+    # 429/403+X-RateLimit-Remaining:0 is GitHub's primary rate limit; a 403
+    # with Retry-After (and no X-RateLimit-Remaining guarantee) is its
+    # secondary/abuse rate limit - both need the same "back off" handling.
     is_rate_limited = response.status_code == 429 or (
         response.status_code == 403
-        and response.headers.get("X-RateLimit-Remaining") == "0"
+        and (
+            response.headers.get("X-RateLimit-Remaining") == "0"
+            or "Retry-After" in response.headers
+        )
     )
     if is_rate_limited:
         if _github_token():
@@ -120,6 +131,9 @@ def _get_response(
         reset_header = response.headers.get("X-RateLimit-Reset")
         if reset_header is not None:
             error["reset_at"] = reset_header
+        retry_after = response.headers.get("Retry-After")
+        if retry_after is not None:
+            error["retry_after_seconds"] = retry_after
         return None, error
 
     if not (200 <= response.status_code < 300):
@@ -160,12 +174,16 @@ def _build_search_query(
     so a multi-word query only matches issues containing every literal word.
     When `broaden` is set, terms are OR'd instead, so any one of them matching
     is enough - used as a fallback when the exact-match search finds nothing.
+
+    The caller-supplied `query` is free text, not trusted search syntax: any
+    `qualifier:value` tokens (e.g. `repo:other/repo`, `is:pr`) are stripped so
+    a query can't widen or redirect the search past repo:_REPO is:issue.
     """
     if broaden:
         words = _significant_words(query, _MAX_OR_TERMS)
         terms = " OR ".join(words) if words else query
     else:
-        terms = query
+        terms = _QUALIFIER_RE.sub(" ", query).strip()
     q = f"repo:{_REPO} is:issue {terms}"
     if state in ("open", "closed"):
         q += f" state:{state}"
@@ -192,29 +210,29 @@ def _fetch_issue(
 
 def _fetch_issue_comments(
     issue_number: int, *, client: httpx.Client | None = None
-) -> tuple[Any, dict[str, Any] | None, bool]:
-    """GET an issue's comments (up to 100). Returns (comments, error, truncated),
-    where `truncated` is True if GitHub reports more comments beyond this page."""
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """GET an issue's comments (up to 100).
+
+    Returns ({"comments": [...], "truncated": bool}, error_dict); exactly one
+    is None. `truncated` is True if GitHub reports more comments beyond this
+    page.
+    """
     response, err = _get_response(
         f"/repos/{_REPO}/issues/{issue_number}/comments",
         {"per_page": 100},
         client=client,
     )
     if err is not None:
-        return None, err, False
+        return None, err
 
     truncated = 'rel="next"' in response.headers.get("Link", "")
     try:
-        return response.json(), None, truncated
+        return {"comments": response.json(), "truncated": truncated}, None
     except ValueError:
-        return (
-            None,
-            {
-                "error": "Received malformed (non-JSON) response from GitHub API",
-                "kind": "malformed_response",
-            },
-            False,
-        )
+        return None, {
+            "error": "Received malformed (non-JSON) response from GitHub API",
+            "kind": "malformed_response",
+        }
 
 
 def _excerpt(body: str, max_len: int = 300) -> str:
@@ -251,7 +269,10 @@ def _format_issue_detail(
         "url": issue_raw["html_url"],
         "body": issue_raw.get("body") or "",
         "comments": [
-            {"author": c["user"]["login"], "body": c.get("body") or ""}
+            {
+                "author": (c.get("user") or {}).get("login") or "ghost",
+                "body": c.get("body") or "",
+            }
             for c in comments_raw
         ],
     }
@@ -302,7 +323,7 @@ def search_issues(
         query, state, limit, broaden=True, client=client
     )
     if err is not None:
-        return result
+        return err
     broadened_result = _format_search_results(broadened_raw, limit)
     if broadened_result["total_count"] == 0:
         return result
@@ -327,14 +348,23 @@ def get_issue(issue_number: int, *, client: httpx.Client | None = None) -> dict[
         (plus "note" if the comment thread was too long to fetch in full),
         or {"error": "...", "kind": "..."} on failure.
     """
-    issue_raw, err = _fetch_issue(issue_number, client=client)
+    # Issue and comments are independent GET requests; fetch them concurrently
+    # instead of paying two round-trips back to back.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        issue_future = pool.submit(_fetch_issue, issue_number, client=client)
+        comments_future = pool.submit(
+            _fetch_issue_comments, issue_number, client=client
+        )
+        issue_raw, err = issue_future.result()
+        comments_result, comments_err = comments_future.result()
+
     if err is not None:
         return err
+    if comments_err is not None:
+        return comments_err
 
-    comments_raw, err, truncated = _fetch_issue_comments(issue_number, client=client)
-    if err is not None:
-        return err
-
+    comments_raw = comments_result["comments"]
+    truncated = comments_result["truncated"]
     result = _format_issue_detail(issue_raw, comments_raw)
     if truncated:
         result["note"] = (
