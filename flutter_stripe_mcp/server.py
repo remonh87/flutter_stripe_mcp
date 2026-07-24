@@ -1,3 +1,4 @@
+import asyncio
 import os
 from typing import Annotated, Any, Literal
 
@@ -84,7 +85,7 @@ def diagnose_setup(project_path: str) -> dict[str, Any]:
         readOnlyHint=True, idempotentHint=True, openWorldHint=True
     )
 )
-def search_flutter_stripe_issues(
+async def search_flutter_stripe_issues(
     query: str,
     state: Literal["all", "open", "closed"] = "all",
     limit: Annotated[int, Field(ge=1, le=30)] = 10,
@@ -114,7 +115,7 @@ def search_flutter_stripe_issues(
         (plus "broadened_search"/"note" if a broader fallback search was used),
         or {"error": "...", "kind": "..."} on failure (e.g. rate-limited).
     """
-    return search_issues(query, state=state, limit=limit)
+    return await asyncio.to_thread(search_issues, query, state=state, limit=limit)
 
 
 @mcp.tool(
@@ -122,7 +123,7 @@ def search_flutter_stripe_issues(
         readOnlyHint=True, idempotentHint=True, openWorldHint=True
     )
 )
-def get_flutter_stripe_issue(issue_number: int) -> dict[str, Any]:
+async def get_flutter_stripe_issue(issue_number: int) -> dict[str, Any]:
     """Fetch the full body and comments of one flutter_stripe GitHub issue.
 
     Use this after search_flutter_stripe_issues has identified a candidate
@@ -138,7 +139,7 @@ def get_flutter_stripe_issue(issue_number: int) -> dict[str, Any]:
         (plus "note" if the comment thread was too long to fetch in full),
         or {"error": "...", "kind": "..."} on failure (e.g. not found).
     """
-    return get_issue(issue_number)
+    return await asyncio.to_thread(get_issue, issue_number)
 
 
 def main() -> None:

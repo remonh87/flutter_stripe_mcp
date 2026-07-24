@@ -2,6 +2,7 @@ import httpx
 
 from flutter_stripe_mcp import github_issues
 from flutter_stripe_mcp.github_issues import (
+    _build_search_query,
     _excerpt,
     _format_issue_detail,
     _format_search_results,
@@ -91,6 +92,28 @@ def test_format_issue_detail_basic():
     assert result["comments"] == [
         {"author": "maintainer", "body": "Fixed by upgrading Kotlin to 1.9.0"}
     ]
+
+
+def test_format_issue_detail_handles_null_user():
+    issue_raw = {
+        "number": 42,
+        "title": "Crash on init",
+        "state": "closed",
+        "html_url": "u",
+        "body": "It crashes when...",
+    }
+    comments_raw = [{"user": None, "body": "left by a deleted account"}]
+    result = _format_issue_detail(issue_raw, comments_raw)
+    assert result["comments"] == [
+        {"author": "ghost", "body": "left by a deleted account"}
+    ]
+
+
+def test_build_search_query_strips_injected_qualifiers():
+    q = _build_search_query("crash repo:other-org/other-repo", "all")
+    assert "repo:other-org/other-repo" not in q
+    assert q.startswith(f"repo:{github_issues._REPO} is:issue")
+    assert "crash" in q
 
 
 # --- HTTP layer, via httpx.MockTransport ------------------------------------
@@ -240,6 +263,19 @@ def test_search_issues_rate_limited_429():
     assert result["kind"] == "rate_limited"
 
 
+def test_search_issues_secondary_rate_limit_via_retry_after():
+    def handler(request):
+        return httpx.Response(
+            403,
+            headers={"Retry-After": "30"},
+            json={"message": "You have exceeded a secondary rate limit"},
+        )
+
+    result = search_issues("crash", client=_client(handler))
+    assert result["kind"] == "rate_limited"
+    assert result["retry_after_seconds"] == "30"
+
+
 def test_network_error():
     def handler(request):
         raise httpx.ConnectError("boom")
@@ -338,6 +374,21 @@ def test_search_issues_no_broadening_for_single_word_query():
     assert "broadened_search" not in result
 
 
+def test_search_issues_surfaces_error_from_failed_broadened_fallback():
+    calls = []
+
+    def handler(request):
+        q = request.url.params["q"]
+        calls.append(q)
+        if " OR " in q:
+            return httpx.Response(429, json={"message": "secondary rate limit"})
+        return httpx.Response(200, json={"total_count": 0, "items": []})
+
+    result = search_issues("kgp plugin build failure", client=_client(handler))
+    assert len(calls) == 2
+    assert result["kind"] == "rate_limited"
+
+
 def test_search_issues_stays_empty_when_broadened_also_empty():
     calls = []
 
@@ -422,7 +473,11 @@ def test_get_issue_reuses_default_client_when_none_injected(monkeypatch):
     result = github_issues.get_issue(7)
 
     assert result["number"] == 7
-    assert request_paths == [
-        "/repos/flutter-stripe/flutter_stripe/issues/7",
-        "/repos/flutter-stripe/flutter_stripe/issues/7/comments",
-    ]
+    # Issue and comments are now fetched concurrently, so their relative
+    # order isn't guaranteed - just that both were requested exactly once.
+    assert sorted(request_paths) == sorted(
+        [
+            "/repos/flutter-stripe/flutter_stripe/issues/7",
+            "/repos/flutter-stripe/flutter_stripe/issues/7/comments",
+        ]
+    )
