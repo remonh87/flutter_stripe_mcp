@@ -1,8 +1,9 @@
 import os
-from typing import Any
+from typing import Annotated, Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
+from pydantic import Field
 
 from flutter_stripe_mcp.diagnostics import (
     check_android_themes,
@@ -13,6 +14,7 @@ from flutter_stripe_mcp.diagnostics import (
     check_main_activity,
     check_proguard_rules,
 )
+from flutter_stripe_mcp.github_issues import get_issue, search_issues
 
 mcp = FastMCP("flutter-stripe-mcp")
 
@@ -75,6 +77,68 @@ def diagnose_setup(project_path: str) -> dict[str, Any]:
     if skipped:
         report["skipped"] = skipped
     return report
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True, idempotentHint=True, openWorldHint=True
+    )
+)
+def search_flutter_stripe_issues(
+    query: str,
+    state: Literal["all", "open", "closed"] = "all",
+    limit: Annotated[int, Field(ge=1, le=30)] = 10,
+) -> dict[str, Any]:
+    """Search GitHub issues in the flutter_stripe repository (flutter-stripe/flutter_stripe).
+
+    Use this to check whether a problem you're debugging (an error message,
+    a crash, an unexpected behavior) is already a known, reported issue —
+    before assuming it's novel or trying to work around it from scratch.
+    Returns short excerpts so you can judge relevance; call
+    get_flutter_stripe_issue with a specific issue number to read the full
+    discussion and find the documented fix or workaround.
+
+    If an exact-match search (all words present) finds nothing, this
+    automatically retries with a broader "any of these words" search and
+    marks the result with "broadened_search": true — treat those results
+    as lower-confidence and check relevance via the excerpt before
+    following up with get_flutter_stripe_issue.
+
+    Args:
+        query: Free-text search terms (e.g. an error message or symptom).
+        state: "all" (default), "open", or "closed".
+        limit: Max number of results to return (1-30).
+
+    Returns:
+        {"total_count": int, "results": [{"number", "title", "state", "url", "excerpt"}]}
+        (plus "broadened_search"/"note" if a broader fallback search was used),
+        or {"error": "...", "kind": "..."} on failure (e.g. rate-limited).
+    """
+    return search_issues(query, state=state, limit=limit)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True, idempotentHint=True, openWorldHint=True
+    )
+)
+def get_flutter_stripe_issue(issue_number: int) -> dict[str, Any]:
+    """Fetch the full body and comments of one flutter_stripe GitHub issue.
+
+    Use this after search_flutter_stripe_issues has identified a candidate
+    issue number, to read the complete discussion — maintainer replies and
+    community comments often contain the actual fix, workaround, or root
+    cause that a title/excerpt alone won't reveal.
+
+    Args:
+        issue_number: The GitHub issue number (e.g. 1234), not a URL.
+
+    Returns:
+        {"number", "title", "state", "url", "body", "comments": [{"author", "body"}]}
+        (plus "note" if the comment thread was too long to fetch in full),
+        or {"error": "...", "kind": "..."} on failure (e.g. not found).
+    """
+    return get_issue(issue_number)
 
 
 def main() -> None:
