@@ -44,3 +44,13 @@ If you change code in `flutter_stripe_mcp/`, stop the inspector (Ctrl+C) and re-
 - `flutter_stripe_mcp/diagnostics.py` — local file checks used by `diagnose_setup`.
 - `flutter_stripe_mcp/github_issues.py` — GitHub API calls used by the issue-search tools.
 - `tests/` — pytest suite; `testfiles/` holds fixture Flutter project trees used by `diagnose_setup` tests.
+
+## Deployment
+
+Publishing to PyPI is handled by `.github/workflows/publish.yml`, which runs on every GitHub release:
+
+1. Bump `version` in `pyproject.toml` and commit it.
+2. Push a matching git tag (e.g. `v0.1.1`) and create a GitHub release from it — publishing the release triggers the workflow.
+3. The workflow runs the test suite, then builds and publishes the package with `uv build` / `uv publish`, authenticating via PyPI trusted publishing (OIDC) — no API token is stored in the repo.
+
+There's no manual publish step; if the workflow's test job fails, the release will not be published to PyPI.

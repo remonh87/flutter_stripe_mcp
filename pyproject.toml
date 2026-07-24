@@ -1,6 +1,6 @@
 [project]
 name = "flutter-stripe-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "MCP server that diagnoses Flutter + Stripe (flutter_stripe) Android and iOS setup issues"
 readme = "README.md"
 license = "MIT"
