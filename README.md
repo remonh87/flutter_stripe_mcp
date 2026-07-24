@@ -4,7 +4,9 @@ An MCP server that diagnoses Flutter + Stripe ([flutter_stripe](https://pub.dev/
 
 ## What it does
 
-One tool, `diagnose_setup`, takes the path to your Flutter project root and runs every check:
+Three tools: one diagnoses your local project setup, and two search GitHub for known issues and their fixes.
+
+`diagnose_setup` takes the path to your Flutter project root and runs every check:
 
 | Check | Requirement |
 |-------|-------------|
@@ -17,6 +19,17 @@ One tool, `diagnose_setup`, takes the path to your Flutter project root and runs
 | `ios_camera_permission` | `NSCameraUsageDescription` set in `Info.plist` (suggestion — needed for card scanning) |
 
 The result lists passing checks by name and returns a `fix` instruction for each problem found. Platforms without an `android/` or `ios/` directory are skipped.
+
+### Checking for known issues
+
+Two more tools let Claude check whether a problem is already a documented issue in the [flutter_stripe GitHub repo](https://github.com/flutter-stripe/flutter_stripe), and read the fix straight from the discussion:
+
+| Tool | Purpose |
+|------|---------|
+| `search_flutter_stripe_issues(query, state="all", limit=10)` | Search issues by keywords (e.g. an error message); returns titles, state, and short excerpts. |
+| `get_flutter_stripe_issue(issue_number)` | Fetch one issue's full body and all comments, to find the actual fix. |
+
+These use GitHub's public search API, which is limited to 60 requests/hour unauthenticated. If you hit the rate limit, the tool returns a clear error instead of failing silently. Optionally, set a `GITHUB_TOKEN` (or `GH_TOKEN`) environment variable to raise this to 5,000 requests/hour — no other configuration needed.
 
 ## Install
 
@@ -66,3 +79,5 @@ Claude calls `diagnose_setup` with the project root and tells you exactly what t
 uv sync
 uv run pytest
 ```
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for running the server locally with MCP Inspector.
